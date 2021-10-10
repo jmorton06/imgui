@@ -551,6 +551,30 @@ void ImGui_ImplVulkan_RenderDrawData(ImDrawData* draw_data, VkCommandBuffer comm
             }
             else
             {
+                
+                static VkDescriptorSet lastSet = VK_NULL_HANDLE;
+                VkDescriptorSet desc_set[1];
+                if (pcmd->TextureId)
+                {
+                    uint32_t index = 0;
+                    auto desc = g_DescriptorSets[frameIndex][pcmd->TextureId];
+                    //if (lastSet != desc)
+                    {
+                        desc_set[0] = desc;
+                        lastSet = desc;
+                        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, bd->PipelineLayout, 0, 1, desc_set, 0, NULL);
+                    }
+                }
+                else
+                {
+                    //if (lastSet != g_DescriptorSet)
+                    {
+                   //     desc_set[0] = g_DescriptorSet;
+                     //   lastSet = g_DescriptorSet;
+                        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, bd->PipelineLayout, 0, 1, desc_set, 0, NULL);
+                    }
+                }
+                                                                
                 // Project scissor/clipping rectangles into framebuffer space
                 ImVec2 clip_min((pcmd->ClipRect.x - clip_off.x) * clip_scale.x, (pcmd->ClipRect.y - clip_off.y) * clip_scale.y);
                 ImVec2 clip_max((pcmd->ClipRect.z - clip_off.x) * clip_scale.x, (pcmd->ClipRect.w - clip_off.y) * clip_scale.y);
@@ -1728,7 +1752,9 @@ void ImGui_ImplVulkan_CreateDescriptorSets(ImDrawData* draw_data, uint32_t frame
     static std::array<std::map<ImTextureID, bool>, 3> g_DescriptorSetHasUpdated;
     g_DescriptorSetHasUpdated[frameIndex].clear();
     
-    ImGui_ImplVulkan_InitInfo* v = &g_VulkanInitInfo;
+    ImGui_ImplVulkan_Data* bd = ImGui_ImplVulkan_GetBackendData();
+    ImGui_ImplVulkan_InitInfo* v = &bd->VulkanInitInfo;
+            
     for (int n = 0; n < draw_data->CmdListsCount; n++)
     {
         const ImDrawList* cmd_list = draw_data->CmdLists[n];
@@ -1747,7 +1773,9 @@ void ImGui_ImplVulkan_CreateDescriptorSets(ImDrawData* draw_data, uint32_t frame
                     alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
                     alloc_info.descriptorPool = v->DescriptorPool;
                     alloc_info.descriptorSetCount = 1;
-                    alloc_info.pSetLayouts = &g_DescriptorSetLayout;
+                    
+                    ImGui_ImplVulkan_Data* bd = ImGui_ImplVulkan_GetBackendData();
+                    alloc_info.pSetLayouts = &bd->DescriptorSetLayout;
                     alloc_info.pNext = nullptr;
                     vkAllocateDescriptorSets(v->Device, &alloc_info, &set);
                     g_DescriptorSets[frameIndex][pcmd->TextureId] = set;
@@ -1784,5 +1812,5 @@ void ImGui_ImplVulkan_AddTexture(ImTextureID id, VkDescriptorSet sets, uint32_t 
 
 VkDescriptorSet ImGui_ImplVulkanH_GetFontDescriptor()
 {
-    return g_DescriptorSet;
+    return VkDescriptorSet();
 }
