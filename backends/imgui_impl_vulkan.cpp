@@ -337,6 +337,14 @@ static uint32_t __glsl_shader_frag_spv[] =
 // FUNCTIONS
 //-----------------------------------------------------------------------------
 
+static std::array<std::map<ImTextureID, VkDescriptorSet>, 3> g_DescriptorSets;
+static std::map<ImTextureID, const VkDescriptorImageInfo*> g_DescriptorImageInfos;
+
+std::map<ImTextureID, const VkDescriptorImageInfo*>& ImGui_ImplVulkan_GetDescriptorImageMap()
+{
+    return g_DescriptorImageInfos;
+}
+
 // Backend data stored in io.BackendRendererUserData to allow support for multiple Dear ImGui contexts
 // It is STRONGLY preferred that you use docking branch with multi-viewports (== single Dear ImGui context + multiple windows) instead of multiple Dear ImGui contexts.
 // FIXME: multi-context support is not tested and probably dysfunctional in this backend.
@@ -448,7 +456,7 @@ static void ImGui_ImplVulkan_SetupRenderState(ImDrawData* draw_data, VkPipeline 
 }
 
 // Render function
-void ImGui_ImplVulkan_RenderDrawData(ImDrawData* draw_data, VkCommandBuffer command_buffer, VkPipeline pipeline)
+void ImGui_ImplVulkan_RenderDrawData(ImDrawData* draw_data, VkCommandBuffer command_buffer, VkPipeline pipeline, uint32_t frameIndex)
 {
     // Avoid rendering when minimized, scale coordinates for retina displays (screen coordinates != framebuffer coordinates)
     int fb_width = (int)(draw_data->DisplaySize.x * draw_data->FramebufferScale.x);
@@ -473,7 +481,8 @@ void ImGui_ImplVulkan_RenderDrawData(ImDrawData* draw_data, VkCommandBuffer comm
         memset(wrb->FrameRenderBuffers, 0, sizeof(ImGui_ImplVulkanH_FrameRenderBuffers) * wrb->Count);
     }
     IM_ASSERT(wrb->Count == v->ImageCount);
-    wrb->Index = (wrb->Index + 1) % wrb->Count;
+    //wrb->Index = (wrb->Index + 1) % wrb->Count;
+    wrb->Index = frameIndex;
     ImGui_ImplVulkanH_FrameRenderBuffers* rb = &wrb->FrameRenderBuffers[wrb->Index];
 
     if (draw_data->TotalVtxCount > 0)
@@ -1712,4 +1721,68 @@ void ImGui_ImplVulkan_InitPlatformInterface()
 void ImGui_ImplVulkan_ShutdownPlatformInterface()
 {
     ImGui::DestroyPlatformWindows();
+}
+
+void ImGui_ImplVulkan_CreateDescriptorSets(ImDrawData* draw_data, uint32_t frameIndex)
+{
+    static std::array<std::map<ImTextureID, bool>, 3> g_DescriptorSetHasUpdated;
+    g_DescriptorSetHasUpdated[frameIndex].clear();
+    
+    ImGui_ImplVulkan_InitInfo* v = &g_VulkanInitInfo;
+    for (int n = 0; n < draw_data->CmdListsCount; n++)
+    {
+        const ImDrawList* cmd_list = draw_data->CmdLists[n];
+        for (int cmd_i = 0; cmd_i < cmd_list->CmdBuffer.Size; cmd_i++)
+        {
+            const ImDrawCmd* pcmd = &cmd_list->CmdBuffer[cmd_i];
+
+            if (pcmd->TextureId)
+            {
+                if (!g_DescriptorSets[frameIndex][pcmd->TextureId])
+                {
+                    VkWriteDescriptorSet descriptorWrites[1] = {};
+
+                    VkDescriptorSet set;
+                    VkDescriptorSetAllocateInfo alloc_info = {};
+                    alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+                    alloc_info.descriptorPool = v->DescriptorPool;
+                    alloc_info.descriptorSetCount = 1;
+                    alloc_info.pSetLayouts = &g_DescriptorSetLayout;
+                    alloc_info.pNext = nullptr;
+                    vkAllocateDescriptorSets(v->Device, &alloc_info, &set);
+                    g_DescriptorSets[frameIndex][pcmd->TextureId] = set;
+                }
+                
+                if(!g_DescriptorSetHasUpdated.at(frameIndex)[pcmd->TextureId])
+                {
+                    VkWriteDescriptorSet descriptorWrites[1] = {};
+                    auto set = g_DescriptorSets.at(frameIndex)[pcmd->TextureId];
+                    descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                    descriptorWrites[0].dstSet = set;
+                    descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                    descriptorWrites[0].pImageInfo = (VkDescriptorImageInfo *) g_DescriptorImageInfos[pcmd->TextureId];
+                    descriptorWrites[0].descriptorCount = 1;
+                    descriptorWrites[0].dstBinding = 0;
+
+                    g_DescriptorSetHasUpdated.at(frameIndex)[pcmd->TextureId] = true;
+                    vkUpdateDescriptorSets(v->Device, 1, descriptorWrites, 0, nullptr);
+                }
+            }
+        }
+    }
+}
+
+void ImGui_ImplVulkan_ClearDescriptors()
+{
+    g_DescriptorSets[0].clear();
+}
+
+void ImGui_ImplVulkan_AddTexture(ImTextureID id, VkDescriptorSet sets, uint32_t index)
+{
+    g_DescriptorSets[index][id] = sets;
+}
+
+VkDescriptorSet ImGui_ImplVulkanH_GetFontDescriptor()
+{
+    return g_DescriptorSet;
 }
